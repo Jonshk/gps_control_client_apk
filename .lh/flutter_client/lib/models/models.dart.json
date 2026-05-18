@@ -1,0 +1,18 @@
+{
+    "sourceFile": "flutter_client/lib/models/models.dart",
+    "activeCommit": 0,
+    "commits": [
+        {
+            "activePatchIndex": 0,
+            "patches": [
+                {
+                    "date": 1779026105305,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n"
+                }
+            ],
+            "date": 1779026105304,
+            "name": "Commit-0",
+            "content": "import 'package:flutter/material.dart';\n\nclass SessionModel {\n  final String token;\n  final String clientName;\n  final String vehicleName;\n  final String vehicleId;\n  final String simNumber;\n\n  const SessionModel({\n    required this.token,\n    required this.clientName,\n    required this.vehicleName,\n    required this.vehicleId,\n    required this.simNumber,\n  });\n\n  factory SessionModel.fromJson(Map<String, dynamic> j) => SessionModel(\n        token: j['token'] as String,\n        clientName: j['client_name'] as String,\n        vehicleName: j['vehicle_name'] as String? ?? '',\n        vehicleId: j['vehicle_id'] as String? ?? '',\n        simNumber: j['sim_number'] as String,\n      );\n}\n\nclass VehicleStatus {\n  final String vehicleId;\n  final String vehicleName;\n  final String status;\n  final double lat;\n  final double lng;\n  final double speed;\n  final String? geofence;\n  final String updatedAt;\n\n  const VehicleStatus({\n    required this.vehicleId,\n    required this.vehicleName,\n    required this.status,\n    required this.lat,\n    required this.lng,\n    required this.speed,\n    this.geofence,\n    required this.updatedAt,\n  });\n\n  factory VehicleStatus.fromJson(Map<String, dynamic> j) => VehicleStatus(\n        vehicleId: j['vehicle_id'] as String? ?? '',\n        vehicleName: j['vehicle_name'] as String? ?? '',\n        status: j['status'] as String,\n        lat: (j['lat'] as num).toDouble(),\n        lng: (j['lng'] as num).toDouble(),\n        speed: (j['speed'] as num).toDouble(),\n        geofence: j['geofence'] as String?,\n        updatedAt: j['updated_at'] as String? ?? '',\n      );\n\n  String get statusLabel => switch (status) {\n        'active' => 'En ruta',\n        'idle' => 'En espera',\n        'offline' => 'Sin señal',\n        _ => status,\n      };\n\n  Color get statusColor => switch (status) {\n        'active' => const Color(0xFF00D4A0),\n        'idle' => const Color(0xFF60A5FA),\n        _ => const Color(0xFFF87171),\n      };\n}\n"
+        }
+    ]
+}

@@ -1,83 +1,86 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter_sms/flutter_sms.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:http/http.dart' as http;
+import '../models/models.dart';
 import '../config.dart';
 
-enum GpsCommand {
-  locate,
-  stopEngine,
-  resumeEngine,
-  moveAlert,
-  speedAlert,
-  online,
-  monitor,
-}
-
-extension GpsCommandExt on GpsCommand {
-  String get label => switch (this) {
-        GpsCommand.locate       => 'Localizar',
-        GpsCommand.stopEngine   => 'Apagar motor',
-        GpsCommand.resumeEngine => 'Encender motor',
-        GpsCommand.moveAlert    => 'Alerta movimiento',
-        GpsCommand.speedAlert   => 'Alerta velocidad',
-        GpsCommand.online       => 'Modo activo',
-        GpsCommand.monitor      => 'Micrófono',
-      };
-
-  String smsMessage(String password) => switch (this) {
-        GpsCommand.locate       => 'check$password',
-        GpsCommand.stopEngine   => 'stop$password',
-        GpsCommand.resumeEngine => 'resume$password',
-        GpsCommand.moveAlert    => 'move$password',
-        GpsCommand.speedAlert   => 'speed$password 080',
-        GpsCommand.online       => 'online$password',
-        GpsCommand.monitor      => 'monitor$password',
-      };
-}
-
-enum SmsResult { sent, openedApp, failed }
-
-extension SmsResultExt on SmsResult {
-  String get message => switch (this) {
-        SmsResult.sent      => 'Comando enviado.',
-        SmsResult.openedApp => 'Se abrió la app de mensajes. Confirma el envío.',
-        SmsResult.failed    => 'No se pudo enviar. Verifica permisos de SMS.',
-      };
-  bool get isSuccess => this != SmsResult.failed;
-}
+typedef GpsResponseCallback = void Function(GpsResponse response);
 
 class SmsService {
-  static Future<SmsResult> sendCommand(GpsCommand cmd, String simNumber) async {
-    final msg = cmd.smsMessage(kGpsPassword);
-    debugPrint('[SMS] → $simNumber : $msg');
+  static GpsResponseCallback? _onResponse;
+  static String? _authToken;
+  static Timer? _pollTimer;
 
-    // Intentar envío silencioso con flutter_sms
+  // ─── Iniciar polling de respuestas del GPS via backend ───────────────────
+  static void startListening({
+    required String token,
+    required GpsResponseCallback onResponse,
+  }) {
+    _authToken = token;
+    _onResponse = onResponse;
+
+    // Poll cada 5 segundos para respuestas del GPS
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchResponses());
+  }
+
+  static void stopListening() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _onResponse = null;
+    _authToken = null;
+  }
+
+  static Future<void> _fetchResponses() async {
+    if (_authToken == null) return;
     try {
-      final status = await Permission.sms.request();
-      if (status.isGranted) {
-        final result = await sendSMS(message: msg, recipients: [simNumber]);
-        if (result == 'SMS Sent!') return SmsResult.sent;
+      final res = await http.get(
+        Uri.parse('$kApiBase/app/responses'),
+        headers: {'x-app-token': _authToken!},
+      ).timeout(const Duration(seconds: 8));
+
+      if (res.statusCode == 200) {
+        final list = jsonDecode(res.body) as List;
+        for (final item in list) {
+          final body = item['body'] as String? ?? '';
+          final response = GpsResponse.fromRaw(body);
+          _onResponse?.call(response);
+        }
       }
     } catch (e) {
-      debugPrint('[SMS] flutter_sms error: $e');
+      debugPrint('[sms] poll error: $e');
     }
+  }
 
-    // Fallback: abrir app de mensajes nativa
+  // ─── Enviar comando via backend → Gateway → GPS ──────────────────────────
+  // No necesita permisos de SMS, no necesita app predeterminada,
+  // funciona con pantalla bloqueada, funciona solo con internet.
+  static Future<SmsResult> sendCommand(GpsCommand cmd, String token) async {
     try {
-      final uri = Uri(
-        scheme: 'sms',
-        path: simNumber,
-        queryParameters: {'body': msg},
-      );
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-        return SmsResult.openedApp;
+      final res = await http.post(
+        Uri.parse('$kApiBase/app/command'),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-app-token': token,
+        },
+        body: jsonEncode({'command': cmd.apiKey}),
+      ).timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        return SmsResult(
+          isSuccess: true,
+          message: 'Comando enviado: ${cmd.label.replaceAll('\n', ' ')}',
+        );
+      } else {
+        final body = jsonDecode(res.body);
+        return SmsResult(
+          isSuccess: false,
+          message: body['detail'] ?? 'Error al enviar comando',
+        );
       }
     } catch (e) {
-      debugPrint('[SMS] url_launcher error: $e');
+      return SmsResult(isSuccess: false, message: 'Error de conexión: $e');
     }
-
-    return SmsResult.failed;
   }
 }

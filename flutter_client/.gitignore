@@ -1,0 +1,10 @@
+.lh/
+../.lh/
+.history/
+../.history/
+build/
+.dart_tool/
+android/.gradle/
+android/.kotlin/
+.idea/
+*.iml

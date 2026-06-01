@@ -5,7 +5,7 @@ import '../config.dart';
 import '../models/models.dart';
 
 class ApiService {
-  static Future<SessionModel> login(String username, String password) async {
+  static Future<SessionData> login(String username, String password) async {
     final res = await http.post(
       Uri.parse('$kApiBase/app/login'),
       headers: {'Content-Type': 'application/json'},
@@ -13,7 +13,7 @@ class ApiService {
     ).timeout(const Duration(seconds: 15));
 
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode == 200) return SessionModel.fromJson(body);
+    if (res.statusCode == 200) return SessionData.fromJson(body);
     throw Exception(body['detail'] ?? 'Error al iniciar sesión');
   }
 
@@ -26,38 +26,41 @@ class ApiService {
     } catch (_) {}
   }
 
-  static Future<VehicleStatus> getStatus(String token) async {
+  static Future<Map<String, dynamic>> getStatus(String token) async {
     final res = await http.get(
       Uri.parse('$kApiBase/app/status'),
       headers: {'x-app-token': token},
     ).timeout(const Duration(seconds: 12));
 
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode == 200) return VehicleStatus.fromJson(body);
+    if (res.statusCode == 200) return body;
     throw Exception(body['detail'] ?? 'Error al obtener estado');
   }
 
-  // ── Persistencia ──────────────────────────────────────────────────────
-  static Future<void> saveSession(SessionModel s) async {
+  static Future<void> saveSession(SessionData s) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString('token',        s.token);
-    await p.setString('client_name',  s.clientName);
-    await p.setString('vehicle_name', s.vehicleName);
-    await p.setString('vehicle_id',   s.vehicleId);
-    await p.setString('sim_number',   s.simNumber);
+    await p.setString('session_json', jsonEncode({
+      'client_id':    s.clientId,
+      'client_name':  s.clientName,
+      'username':     s.username,
+      'account_type': s.accountType,
+      'ws_token':     s.wsToken,
+      'token':        s.token,
+      'phone':        s.phone ?? '',
+      'vehicle_id':   s.vehicleId ?? '',
+      'sim_number':   s.simNumber ?? '',
+    }));
   }
 
-  static Future<SessionModel?> loadSession() async {
+  static Future<SessionData?> loadSession() async {
     final p = await SharedPreferences.getInstance();
-    final token = p.getString('token');
-    if (token == null) return null;
-    return SessionModel(
-      token:       token,
-      clientName:  p.getString('client_name')  ?? '',
-      vehicleName: p.getString('vehicle_name') ?? '',
-      vehicleId:   p.getString('vehicle_id')   ?? '',
-      simNumber:   p.getString('sim_number')   ?? '',
-    );
+    final raw = p.getString('session_json');
+    if (raw == null) return null;
+    try {
+      return SessionData.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<void> clearSession() async {

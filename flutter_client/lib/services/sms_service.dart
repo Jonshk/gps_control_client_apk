@@ -1,86 +1,69 @@
-import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:http/http.dart' as http;
-import '../models/models.dart';
+import 'package:telephony/telephony.dart';
 import '../config.dart';
 
-typedef GpsResponseCallback = void Function(GpsResponse response);
-
 class SmsService {
-  static GpsResponseCallback? _onResponse;
-  static String? _authToken;
-  static Timer? _pollTimer;
+  static final _telephony = Telephony.instance;
+  static bool _listening = false;
+  static void Function(String body, String from)? _onIncoming;
+  static String? _gpsSimNumber;
 
-  // ─── Iniciar polling de respuestas del GPS via backend ───────────────────
-  static void startListening({
-    required String token,
-    required GpsResponseCallback onResponse,
-  }) {
-    _authToken = token;
-    _onResponse = onResponse;
+  // ── Iniciar escucha SMS entrantes ─────────────────────────────────────
+  static Future<void> startListening({
+    required String simNumber,
+    required void Function(String body, String from) onIncoming,
+  }) async {
+    _gpsSimNumber = _normalize(simNumber);
+    _onIncoming   = onIncoming;
+    if (_listening) return;
+    _listening = true;
 
-    // Poll cada 5 segundos para respuestas del GPS
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchResponses());
+    final granted = await _telephony.requestPhoneAndSmsPermissions ?? false;
+    if (!granted) return;
+
+    _telephony.listenIncomingSms(
+      onNewMessage: _handle,
+      onBackgroundMessage: _bgHandler,
+      listenInBackground: false,
+    );
   }
 
   static void stopListening() {
-    _pollTimer?.cancel();
-    _pollTimer = null;
-    _onResponse = null;
-    _authToken = null;
+    _listening     = false;
+    _onIncoming    = null;
+    _gpsSimNumber  = null;
   }
 
-  static Future<void> _fetchResponses() async {
-    if (_authToken == null) return;
-    try {
-      final res = await http.get(
-        Uri.parse('$kApiBase/app/responses'),
-        headers: {'x-app-token': _authToken!},
-      ).timeout(const Duration(seconds: 8));
-
-      if (res.statusCode == 200) {
-        final list = jsonDecode(res.body) as List;
-        for (final item in list) {
-          final body = item['body'] as String? ?? '';
-          final response = GpsResponse.fromRaw(body);
-          _onResponse?.call(response);
-        }
-      }
-    } catch (e) {
-      debugPrint('[sms] poll error: $e');
+  static void _handle(SmsMessage message) {
+    final from = _normalize(message.address ?? '');
+    final body = message.body ?? '';
+    if (_gpsSimNumber != null && from.endsWith(_gpsSimNumber!.takeLast(7))) {
+      _onIncoming?.call(body, from);
     }
   }
 
-  // ─── Enviar comando via backend → Gateway → GPS ──────────────────────────
-  // No necesita permisos de SMS, no necesita app predeterminada,
-  // funciona con pantalla bloqueada, funciona solo con internet.
-  static Future<SmsResult> sendCommand(GpsCommand cmd, String token) async {
+  // ── Enviar comando SMS ─────────────────────────────────────────────────
+  // Llamar con: SmsService.sendCommand(phone: sim, command: 'DW1')
+  static Future<bool> sendCommand({
+    required String phone,
+    required String command,
+  }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$kApiBase/app/command'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-app-token': token,
-        },
-        body: jsonEncode({'command': cmd.apiKey}),
-      ).timeout(const Duration(seconds: 15));
-
-      if (res.statusCode == 200) {
-        return SmsResult(
-          isSuccess: true,
-          message: 'Comando enviado: ${cmd.label.replaceAll('\n', ' ')}',
-        );
-      } else {
-        final body = jsonDecode(res.body);
-        return SmsResult(
-          isSuccess: false,
-          message: body['detail'] ?? 'Error al enviar comando',
-        );
-      }
-    } catch (e) {
-      return SmsResult(isSuccess: false, message: 'Error de conexión: $e');
+      final granted = await _telephony.requestPhoneAndSmsPermissions ?? false;
+      if (!granted) return false;
+      await _telephony.sendSms(to: phone, message: command);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
+
+  static String _normalize(String n) =>
+      n.replaceAll(RegExp(r'[\s\-\(\)\+]'), '');
+}
+
+@pragma('vm:entry-point')
+void _bgHandler(SmsMessage message) {}
+
+extension on String {
+  String takeLast(int n) => length <= n ? this : substring(length - n);
 }

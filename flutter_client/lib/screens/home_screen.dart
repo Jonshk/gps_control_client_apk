@@ -9,6 +9,7 @@ import '../models/models.dart';
 import '../services/websocket_service.dart';
 import '../services/sms_service.dart';
 import '../services/api_service.dart';
+import 'change_password_screen.dart';
 
 class AppCommand {
   final String key, label, description, command;
@@ -165,7 +166,6 @@ class _IndividualState extends State<IndividualHomeScreen> with TickerProviderSt
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E1A),
       body: SafeArea(child: LayoutBuilder(builder: (context, constraints) {
-        // Altura disponible - topbar(58) - handle(20) - botones(~260) = mapa
         final mapH = (constraints.maxHeight - 58 - 20 - 260).clamp(150.0, 500.0);
         return Column(children: [
           _TopBar(session:widget.session, updated:_updated, speed:_speed, battery:_battery, wsLive:_wsLive, onMenu:_showDrawer),
@@ -288,8 +288,6 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
       body: SafeArea(child: LayoutBuilder(builder: (context, constraints) {
         final mapH = (constraints.maxHeight - 58 - 72 - 20 - 260).clamp(120.0, 400.0);
         return Column(children: [
-
-          // TopBar flota
           Container(color:const Color(0xFF111827), padding:const EdgeInsets.fromLTRB(14,10,14,10),
             child:Row(children:[
               GestureDetector(onTap:_showDrawer, child:Container(width:38,height:38,
@@ -309,8 +307,6 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
                   Text(_wsLive?'LIVE':'OFF', style:TextStyle(color:_wsLive?const Color(0xFF22C55E):const Color(0xFFEF4444), fontSize:9, fontWeight:FontWeight.w900)),
                 ])),
             ])),
-
-          // Vehículos horizontales
           SizedBox(height:72, child:Container(color:const Color(0xFF0F1623),
             child:ListView.builder(scrollDirection:Axis.horizontal, padding:const EdgeInsets.symmetric(horizontal:10,vertical:10),
               itemCount:vehicles.length, itemBuilder:(_,i) {
@@ -329,8 +325,6 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
                     ]),
                   ])));
               }))),
-
-          // Mapa
           SizedBox(height:mapH, child:_MapArea(mapController:_map, lat:_sel?.lat, lng:_sel?.lng, heading:_sel?.heading??0,
             status:_sel?.status??'offline', statusColor:_vc(_sel?.status), onMenu:_showDrawer,
             extraMarkers: vehicles.where((v)=>v.id!=_sel?.id&&v.lat!=null&&v.lng!=null).map((v)=>
@@ -339,9 +333,7 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
                   decoration:BoxDecoration(shape:BoxShape.circle, color:_vc(v.status).withOpacity(0.3),
                     border:Border.all(color:_vc(v.status), width:1.5)),
                   child:Icon(Icons.directions_car, color:_vc(v.status), size:16))))).toList())),
-
           _ResizeHint(),
-
           if (_sel!=null)
             Expanded(child:SingleChildScrollView(child:_CommandPanel(commands:_mainCommands, cmdState:_state, cmdResp:_resp, pulseCtrl:_pulse, onSend:_send)))
           else
@@ -449,7 +441,6 @@ class _BigBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     final isWait = state==CmdState.sending||state==CmdState.waiting;
     final isAns  = state==CmdState.answered&&response!=null;
-    // Altura dinámica basada en pantalla
     final h = (MediaQuery.of(context).size.height * 0.26).clamp(180.0, 240.0);
     return GestureDetector(onTap:isWait?null:onTap, child:AnimatedBuilder(
       animation:pulse??kAlwaysCompleteAnimation,
@@ -538,7 +529,7 @@ class _InfoDrawer extends StatelessWidget {
   const _InfoDrawer({required this.session, required this.speed, required this.battery, required this.status, required this.statusColor, required this.updated, required this.log, required this.onLogout});
   @override
   Widget build(BuildContext context) => Container(
-    height:MediaQuery.of(context).size.height*0.65,
+    height:MediaQuery.of(context).size.height*0.68,
     decoration:const BoxDecoration(color:Color(0xFF111827), borderRadius:BorderRadius.vertical(top:Radius.circular(20))),
     child:Column(children:[
       const SizedBox(height:8),
@@ -580,6 +571,22 @@ class _InfoDrawer extends StatelessWidget {
           ]));
         })),
       const Divider(color:Color(0xFF1F2937)),
+      // Cambiar contraseña
+      InkWell(
+        onTap: () {
+          Navigator.pop(context);
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ChangePasswordScreen(token: session.token),
+          ));
+        },
+        child: const Padding(padding: EdgeInsets.symmetric(vertical:12),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children:[
+            Icon(Icons.lock_reset_rounded, color: Color(0xFF00D4A0), size:18),
+            SizedBox(width:8),
+            Text('Cambiar contraseña', style: TextStyle(color: Color(0xFF00D4A0), fontSize:13, fontWeight:FontWeight.bold)),
+          ]))),
+      const Divider(color:Color(0xFF1F2937)),
+      // Cerrar sesión
       InkWell(onTap:onLogout, child:const Padding(padding:EdgeInsets.symmetric(vertical:14),
         child:Row(mainAxisAlignment:MainAxisAlignment.center, children:[
           Icon(Icons.logout, color:Color(0xFFEF4444), size:18), SizedBox(width:8),

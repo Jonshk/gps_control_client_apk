@@ -37,6 +37,25 @@ class ApiService {
     throw Exception(body['detail'] ?? 'Error al obtener estado');
   }
 
+  static Future<void> changePassword(String token, String currentPassword, String newPassword) async {
+    final res = await http.post(
+      Uri.parse('$kApiBase/app/change-password'),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-app-token': token,
+      },
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    ).timeout(const Duration(seconds: 15));
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) {
+      throw Exception(body['detail'] ?? 'Error al cambiar contraseña');
+    }
+  }
+
   static Future<void> saveSession(SessionData s) async {
     final p = await SharedPreferences.getInstance();
     await p.setString('session_json', jsonEncode({

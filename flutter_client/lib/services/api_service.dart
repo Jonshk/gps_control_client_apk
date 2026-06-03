@@ -37,6 +37,33 @@ class ApiService {
     throw Exception(body['detail'] ?? 'Error al obtener estado');
   }
 
+  static Future<Map<String, dynamic>> sendCommand(String token, String command) async {
+    final res = await http.post(
+      Uri.parse('$kApiBase/app/command'),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-app-token': token,
+      },
+      body: jsonEncode({'command': command}),
+    ).timeout(const Duration(seconds: 15));
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode == 200) return body;
+    throw Exception(body['detail'] ?? 'Error al enviar comando');
+  }
+
+  static Future<List<Map<String, dynamic>>> getResponses(String token) async {
+    final res = await http.get(
+      Uri.parse('$kApiBase/app/responses'),
+      headers: {'x-app-token': token},
+    ).timeout(const Duration(seconds: 10));
+
+    if (res.statusCode == 200) {
+      return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+    }
+    return [];
+  }
+
   static Future<void> changePassword(String token, String currentPassword, String newPassword) async {
     final res = await http.post(
       Uri.parse('$kApiBase/app/change-password'),

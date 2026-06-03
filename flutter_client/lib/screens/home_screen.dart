@@ -135,25 +135,75 @@ class _IndividualState extends State<IndividualHomeScreen> with TickerProviderSt
   String _clock(DateTime dt) => '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}:${dt.second.toString().padLeft(2,'0')}';
 
   @override
-  void dispose() { _wsSub?.cancel(); _ws.disconnect(); SmsService.stopListening(); for (final c in _pulse.values) c.dispose(); super.dispose(); }
+  @override
+  void dispose() { _pollTimer?.cancel(); _wsSub?.cancel(); _ws.disconnect(); SmsService.stopListening(); for (final c in _pulse.values) c.dispose(); super.dispose(); }
 
-  Color get _sc => _status=='active' ? const Color(0xFF22C55E) : _status=='idle' ? const Color(0xFFF59E0B) : const Color(0xFFEF4444);
+  Color get _sc
 
   Future<void> _send(String key) async {
-    final phone = widget.session.simNumber ?? widget.session.phone;
-    if (phone==null||phone.isEmpty) return;
     HapticFeedback.mediumImpact();
     _pulse[key] ??= AnimationController(vsync:this, duration:const Duration(milliseconds:900))..repeat(reverse:true);
-    final sms = buildSms(key, kPass);
     final cmd = _mainCommands.firstWhere((c)=>c.key==key);
-    setState(() { _state[key]=CmdState.sending; _resp.remove(key);
-      _log.insert(0, _SmsLog(type:'sent', label:cmd.label, value:sms, icon:'📤', time:DateTime.now())); });
-    final ok = await SmsService.sendCommand(phone:phone, command:sms);
-    if (!mounted) return;
-    setState(() => _state[key]=ok?CmdState.waiting:CmdState.idle);
-    if (!ok) { _pulse[key]?.stop(); setState(() { _resp[key]={'icon':'❌','label':'No enviado','value':'Error SMS','time':_clock(DateTime.now())}; _state[key]=CmdState.answered; }); return; }
-    Future.delayed(const Duration(seconds:90), () {
-      if (mounted&&_state[key]==CmdState.waiting) { _pulse[key]?.stop(); setState(() { _state[key]=CmdState.answered; _resp[key]={'icon':'⏱️','label':'Sin respuesta','value':'Tiempo agotado','time':_clock(DateTime.now())}; }); }
+    setState(() {
+      _state[key]=CmdState.sending;
+      _resp.remove(key);
+      _log.insert(0, _SmsLog(type:'sent', label:cmd.label, value:'Enviando via servidor...', icon:'📤', time:DateTime.now()));
+    });
+
+    try {
+      await ApiService.sendCommand(widget.session.token, key);
+      if (!mounted) return;
+      setState(() => _state[key]=CmdState.waiting);
+      _startPolling(key);
+    } catch (e) {
+      if (!mounted) return;
+      _pulse[key]?.stop();
+      setState(() {
+        _state[key]=CmdState.answered;
+        _resp[key]={'icon':'❌','label':'Error','value':e.toString().replaceFirst('Exception: ',''),'time':_clock(DateTime.now())};
+      });
+    }
+  }
+
+  Timer? _pollTimer;
+  int _pollCount = 0;
+
+  void _startPolling(String key) {
+    _pollTimer?.cancel();
+    _pollCount = 0;
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      _pollCount++;
+      if (_pollCount > 22) { // ~90 segundos
+        t.cancel();
+        if (mounted && _state[key]==CmdState.waiting) {
+          _pulse[key]?.stop();
+          setState(() { _state[key]=CmdState.answered; _resp[key]={'icon':'⏱️','label':'Sin respuesta','value':'Tiempo agotado','time':_clock(DateTime.now())}; });
+        }
+        return;
+      }
+      try {
+        final responses = await ApiService.getResponses(widget.session.token);
+        if (responses.isEmpty || !mounted) return;
+        final latest = responses.first;
+        final receivedAt = latest['received_at'] as String? ?? '';
+        // Solo procesar si es reciente (menos de 2 minutos)
+        final dt = DateTime.tryParse(receivedAt);
+        if (dt != null && DateTime.now().toUtc().difference(dt).inMinutes < 2) {
+          t.cancel();
+          _pulse[key]?.stop();
+          final parsed = parseSms(latest['body'] as String? ?? '');
+          parsed['time'] = _clock(DateTime.now());
+          if (!mounted) return;
+          setState(() {
+            _state[key]=CmdState.answered;
+            _resp[key]=parsed;
+            _log.insert(0, _SmsLog(type:'received', label:parsed['label']!, value:parsed['value']!, icon:parsed['icon']!, time:DateTime.now()));
+            final lat = double.tryParse(parsed['lat']??'');
+            final lng = double.tryParse(parsed['lng']??'');
+            if (lat!=null&&lng!=null) { _lat=lat; _lng=lng; _status='active'; _updated=_clock(DateTime.now()); _map.move(LatLng(lat,lng),16); }
+          });
+        }
+      } catch (_) {}
     });
   }
 
@@ -246,7 +296,7 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
   String _clock(DateTime dt) => '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}:${dt.second.toString().padLeft(2,'0')}';
 
   @override
-  void dispose() { _wsSub?.cancel(); _ws.disconnect(); SmsService.stopListening(); for (final c in _pulse.values) c.dispose(); super.dispose(); }
+  void dispose() { _pollTimer?.cancel(); _wsSub?.cancel(); _ws.disconnect(); SmsService.stopListening(); for (final c in _pulse.values) c.dispose(); super.dispose(); }
 
   void _selectVehicle(FleetVehicle v) {
     setState(() { _sel=v; _state.clear(); _resp.clear(); _log.clear(); });
@@ -258,20 +308,68 @@ class _FleetState extends State<FleetHomeScreen> with TickerProviderStateMixin {
 
   Future<void> _send(String key) async {
     if (_sel==null) return;
-    final phone = _sel!.phone ?? '';
-    if (phone.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Sin SIM configurada'))); return; }
     HapticFeedback.mediumImpact();
     _pulse[key] ??= AnimationController(vsync:this, duration:const Duration(milliseconds:900))..repeat(reverse:true);
-    final sms = buildSms(key, kPass);
     final cmd = _mainCommands.firstWhere((c)=>c.key==key);
-    setState(() { _state[key]=CmdState.sending; _resp.remove(key);
-      _log.insert(0, _SmsLog(type:'sent', label:cmd.label, value:sms, icon:'📤', time:DateTime.now())); });
-    final ok = await SmsService.sendCommand(phone:phone, command:sms);
-    if (!mounted) return;
-    setState(() => _state[key]=ok?CmdState.waiting:CmdState.idle);
-    if (!ok) { _pulse[key]?.stop(); setState(() { _resp[key]={'icon':'❌','label':'No enviado','value':'Error SMS'}; _state[key]=CmdState.answered; }); return; }
-    Future.delayed(const Duration(seconds:90), () {
-      if (mounted&&_state[key]==CmdState.waiting) { _pulse[key]?.stop(); setState(() { _state[key]=CmdState.answered; _resp[key]={'icon':'⏱️','label':'Sin respuesta','value':'Tiempo agotado'}; }); }
+    setState(() {
+      _state[key]=CmdState.sending;
+      _resp.remove(key);
+      _log.insert(0, _SmsLog(type:'sent', label:cmd.label, value:'Enviando via servidor...', icon:'📤', time:DateTime.now()));
+    });
+
+    try {
+      await ApiService.sendCommand(widget.session.token, key);
+      if (!mounted) return;
+      setState(() => _state[key]=CmdState.waiting);
+      _startPolling(key);
+    } catch (e) {
+      if (!mounted) return;
+      _pulse[key]?.stop();
+      setState(() {
+        _state[key]=CmdState.answered;
+        _resp[key]={'icon':'❌','label':'Error','value':e.toString().replaceFirst('Exception: ','')};
+      });
+    }
+  }
+
+  Timer? _pollTimer;
+  int _pollCount = 0;
+
+  void _startPolling(String key) {
+    _pollTimer?.cancel();
+    _pollCount = 0;
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      _pollCount++;
+      if (_pollCount > 22) {
+        t.cancel();
+        if (mounted && _state[key]==CmdState.waiting) {
+          _pulse[key]?.stop();
+          setState(() { _state[key]=CmdState.answered; _resp[key]={'icon':'⏱️','label':'Sin respuesta','value':'Tiempo agotado'}; });
+        }
+        return;
+      }
+      try {
+        final responses = await ApiService.getResponses(widget.session.token);
+        if (responses.isEmpty || !mounted) return;
+        final latest = responses.first;
+        final receivedAt = latest['received_at'] as String? ?? '';
+        final dt = DateTime.tryParse(receivedAt);
+        if (dt != null && DateTime.now().toUtc().difference(dt).inMinutes < 2) {
+          t.cancel();
+          _pulse[key]?.stop();
+          final parsed = parseSms(latest['body'] as String? ?? '');
+          parsed['time'] = _clock(DateTime.now());
+          if (!mounted) return;
+          setState(() {
+            _state[key]=CmdState.answered;
+            _resp[key]=parsed;
+            _log.insert(0, _SmsLog(type:'received', label:parsed['label']!, value:parsed['value']!, icon:parsed['icon']!, time:DateTime.now()));
+            final lat = double.tryParse(parsed['lat']??'');
+            final lng = double.tryParse(parsed['lng']??'');
+            if (lat!=null&&lng!=null&&_sel!=null) { _live[_sel!.id]=_sel!.copyWith(lat:lat,lng:lng,status:'active'); _sel=_live[_sel!.id]; _updated=_clock(DateTime.now()); _map.move(LatLng(lat,lng),16); }
+          });
+        }
+      } catch (_) {}
     });
   }
 

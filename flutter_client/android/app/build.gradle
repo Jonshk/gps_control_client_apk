@@ -4,6 +4,27 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+
+if (!keystorePropertiesFile.exists()) {
+    throw new GradleException("No se encontró android/key.properties")
+}
+
+keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+
+def storeFilePath = keystoreProperties["storeFile"]
+
+if (storeFilePath == null || storeFilePath.trim().isEmpty()) {
+    throw new GradleException("storeFile está vacío en android/key.properties")
+}
+
+def releaseKeystoreFile = file(storeFilePath)
+
+if (!releaseKeystoreFile.exists()) {
+    throw new GradleException("No se encontró el keystore en: " + releaseKeystoreFile)
+}
+
 android {
     namespace "com.gpscontrolec.client"
     compileSdk = flutter.compileSdkVersion
@@ -15,20 +36,32 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = "1.8"
     }
 
     defaultConfig {
-        applicationId = "com.gpscontrolec.client"
+        applicationId "com.gpscontrolec.client"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties["keyAlias"]
+            keyPassword keystoreProperties["keyPassword"]
+            storeFile releaseKeystoreFile
+            storePassword keystoreProperties["storePassword"]
+            storeType "PKCS12"
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.debug
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            shrinkResources false
         }
     }
 }

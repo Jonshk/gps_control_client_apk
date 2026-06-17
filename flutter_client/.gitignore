@@ -8,3 +8,26 @@ android/.gradle/
 android/.kotlin/
 .idea/
 *.iml
+
+# Flutter / Dart generated
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Android generated
+android/.gradle/
+android/app/build/
+android/local.properties
+android/java_pid*.hprof
+
+# Android signing keys - DO NOT COMMIT
+android/key.properties
+android/app/*.jks
+android/app/*.p12
+*.jks
+*.p12
+
+# VS Code local
+.vscode/
+../.vscode/
